@@ -36,6 +36,7 @@ import org.camunda.bpm.engine.impl.persistence.entity.ProcessDefinitionEntity;
 import org.camunda.bpm.engine.impl.persistence.entity.TaskEntity;
 import org.camunda.bpm.engine.impl.util.xml.Element;
 import org.camunda.bpm.engine.repository.Deployment;
+import org.camunda.bpm.engine.repository.ProcessDefinition;
 import org.camunda.bpm.engine.runtime.CaseInstance;
 import org.camunda.bpm.engine.runtime.Execution;
 import org.camunda.bpm.engine.runtime.ProcessInstance;
@@ -45,6 +46,7 @@ import org.camunda.bpm.engine.task.TaskQuery;
 import org.camunda.bpm.engine.test.ProcessEngineRule;
 import org.camunda.bpm.engine.test.RequiredHistoryLevel;
 import org.camunda.bpm.engine.test.api.runtime.migration.models.ProcessModels;
+import org.camunda.bpm.engine.test.api.runtime.migration.models.SignalCatchModels;
 import org.camunda.bpm.engine.test.bpmn.event.conditional.AbstractConditionalEventTestCase;
 import org.camunda.bpm.engine.test.bpmn.event.conditional.SetVariableDelegate;
 import org.camunda.bpm.engine.test.util.ProcessEngineTestRule;
@@ -54,6 +56,7 @@ import org.camunda.bpm.engine.variable.Variables;
 import org.camunda.bpm.engine.variable.value.TypedValue;
 import org.camunda.bpm.model.bpmn.Bpmn;
 import org.camunda.bpm.model.bpmn.BpmnModelInstance;
+import org.camunda.bpm.model.bpmn.impl.instance.ScriptImpl;
 import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Rule;
@@ -324,6 +327,51 @@ public class TransientVariableTest {
     List<VariableInstance> variables = runtimeService.createVariableInstanceQuery().list();
     assertEquals(1, variables.size());
     assertEquals(variables.get(0).getValue(), 9L);
+  }
+
+  @Test
+  public void testStartProcessInstanceWithFormsUsingTransientVariables() {
+    // given
+    testRule.deploy("org/camunda/bpm/engine/test/api/form/FormServiceTest.startFormFieldsWithTransientFlags.bpmn20.xml");
+    ProcessDefinition processDefinition = engineRule.getRepositoryService().createProcessDefinitionQuery().singleResult();
+
+    // when
+    Map<String, Object> formValues = new HashMap<String, Object>();
+    formValues.put("stringField", Variables.stringValueTransient("foobar"));
+    formValues.put("longField", 9L);
+    engineRule.getFormService().submitStartForm(processDefinition.getId(), formValues);
+
+    // then
+    List<VariableInstance> variables = runtimeService.createVariableInstanceQuery().list();
+    assertEquals(1, variables.size());
+    assertEquals(variables.get(0).getValue(), 9L);
+  }
+
+  @Test
+  public void testSignalWithTransientVariables() {
+    // given
+    BpmnModelInstance instance = Bpmn.createExecutableProcess("Process")
+    .startEvent()
+    .intermediateCatchEvent("signalCatch")
+      .signal("signal")
+    .scriptTask("scriptTask")
+      .scriptFormat("javascript")
+      .camundaResultVariable("abc")
+      .scriptText("execution.setVariable('abc', foo);")
+    .endEvent()
+    .done();
+
+    testRule.deploy(instance);
+    runtimeService.startProcessInstanceByKey("Process");
+
+    // when
+    runtimeService.signalEventReceived("signal",
+        Variables.createVariables().putValue("foo", Variables.stringValueTransient("bar")));
+
+    // then
+    List<HistoricVariableInstance> variables = historyService.createHistoricVariableInstanceQuery().list();
+    assertEquals(1, variables.size());
+    assertEquals("abc", variables.get(0).getName());
   }
 
   public static class SetVariableTransientDelegate implements JavaDelegate {
